@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: quiniela-mundial-2026
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: quiniela-db
+      mountPath: /var/data
+      sizeGB: 1
