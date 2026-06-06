@@ -364,7 +364,30 @@ nav{background:var(--surface2);border-bottom:1px solid var(--border);display:fle
   </div>
   <div class="admin-section">
     <h3>👤 Usuarios registrados (<span id="users-count">0</span>)</h3>
-    <div class="result-list" id="users-list"></div>
+    <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="text" id="user-search" placeholder="🔍 Buscar por nombre o cocina..."
+        oninput="renderAdminUsers()"
+        style="background:#071525;border:1px solid var(--border);border-radius:6px;color:var(--text);
+          padding:7px 12px;font-size:13px;font-family:'Barlow',sans-serif;outline:none;flex:1;min-width:200px"/>
+      <span style="font-size:11px;color:var(--muted)">Haz clic en 🗑️ para eliminar un usuario y todos sus pronósticos.</span>
+    </div>
+    <div style="overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:13px" id="users-table">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border);color:var(--accent);font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:1px">
+            <th style="padding:8px 10px;text-align:left">#</th>
+            <th style="padding:8px 10px;text-align:left">NOMBRE</th>
+            <th style="padding:8px 10px;text-align:left">COCINA</th>
+            <th style="padding:8px 10px;text-align:left">CORREO</th>
+            <th style="padding:8px 10px;text-align:center">PRONÓST.</th>
+            <th style="padding:8px 10px;text-align:center">PTS</th>
+            <th style="padding:8px 10px;text-align:center">REGISTRO</th>
+            <th style="padding:8px 10px;text-align:center">ACCIÓN</th>
+          </tr>
+        </thead>
+        <tbody id="users-tbody"></tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -833,6 +856,7 @@ async function renderLeaderboard() {
   tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:16px"><span class="spinner"></span> Cargando...</td></tr>';
   const data = await api('GET', '/api/leaderboard');
   if (!data) return;
+  window._lbCache = data; playersCache = data;
   tbody.innerHTML = '';
   data.forEach((u, i) => {
     const tr = document.createElement('tr');
@@ -858,7 +882,7 @@ let playersCache = [];
 async function renderPlayers() {
   if (!playersCache.length) {
     const data = await api('GET', '/api/leaderboard');
-    if (data) playersCache = data;
+    if (data) { playersCache = data; window._lbCache = data; }
   }
   const q = (document.getElementById('player-search').value || '').toLowerCase();
   const grid = document.getElementById('players-grid');
@@ -940,15 +964,72 @@ async function renderAdmin() {
     list.appendChild(div);
   });
   // users
-  const users = await api('GET', '/api/users');
-  document.getElementById('users-count').textContent = users?.length || 0;
-  const ulist = document.getElementById('users-list');
-  ulist.innerHTML = '';
-  (users||[]).forEach((u,i) => {
-    const div=document.createElement('div'); div.className='result-item';
-    div.innerHTML=`<b>${i+1}.</b> ${u.name} <span style="color:var(--accent)">— ${u.kitchen}</span> <span style="color:var(--muted2)">${u.email}</span>`;
-    ulist.appendChild(div);
+  window._adminUsers = await api('GET', '/api/users') || [];
+  document.getElementById('users-count').textContent = window._adminUsers.length;
+  renderAdminUsers();
+}
+
+function renderAdminUsers() {
+  const q = (document.getElementById('user-search')?.value || '').toLowerCase();
+  const users = window._adminUsers || [];
+  const tbody = document.getElementById('users-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  const filtered = users.filter(u => !q || (u.name+u.kitchen+u.email).toLowerCase().includes(q));
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="padding:16px;color:var(--muted);text-align:center">Sin usuarios.</td></tr>';
+    return;
+  }
+  // Compute pts + predCount per user from leaderboard cache
+  const lbCache = window._lbCache || [];
+  filtered.forEach((u, i) => {
+    const lbEntry = lbCache.find(x => x.id === u.id);
+    const pts = lbEntry?.total ?? '—';
+    const preds = lbEntry?.predCount ?? '—';
+    const isMe = ME && u.id === ME.id;
+    const isAdmin = u.is_admin;
+    const regDate = u.registered_at ? u.registered_at.slice(0,10) : '—';
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid var(--border2)';
+    tr.innerHTML = `
+      <td style="padding:9px 10px;color:var(--muted)">${i+1}</td>
+      <td style="padding:9px 10px;font-weight:600">${u.name}${isMe?'<span style="font-size:9px;background:var(--accent);color:#000;padding:1px 5px;border-radius:3px;margin-left:6px">TÚ</span>':''}${isAdmin?'<span style="font-size:9px;background:var(--red);color:#fff;padding:1px 5px;border-radius:3px;margin-left:4px">ADMIN</span>':''}</td>
+      <td style="padding:9px 10px;color:var(--accent)">${u.kitchen}</td>
+      <td style="padding:9px 10px;color:var(--muted);font-size:12px">${u.email}</td>
+      <td style="padding:9px 10px;text-align:center;color:var(--muted)">${preds}</td>
+      <td style="padding:9px 10px;text-align:center;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:700;color:var(--gold)">${pts}</td>
+      <td style="padding:9px 10px;text-align:center;color:var(--muted);font-size:11px">${regDate}</td>
+      <td style="padding:9px 10px;text-align:center">
+        ${!isAdmin && !isMe
+          ? `<button onclick="deleteUser(${u.id},'${u.name.replace(/'/g,"\'")}',this)"
+              style="background:transparent;border:1px solid var(--red);color:var(--red);border-radius:5px;
+                padding:4px 10px;cursor:pointer;font-size:12px;font-weight:600;transition:all .12s"
+              onmouseover="this.style.background='var(--red)';this.style.color='#fff'"
+              onmouseout="this.style.background='transparent';this.style.color='var(--red)'">
+              🗑️ Eliminar
+            </button>`
+          : '<span style="color:var(--muted2);font-size:11px">—</span>'}
+      </td>
+    `;
+    tbody.appendChild(tr);
   });
+}
+
+async function deleteUser(userId, userName, btn) {
+  if (!confirm(`¿Eliminar a "${userName}"?\n\nSe borrarán también todos sus pronósticos. Esta acción no se puede deshacer.`)) return;
+  btn.disabled = true; btn.textContent = '...';
+  const res = await api('DELETE', '/api/users/' + userId);
+  if (!res || res.error) {
+    alert('Error: ' + (res?.error || 'No se pudo eliminar.'));
+    btn.disabled = false; btn.textContent = '🗑️ Eliminar';
+    return;
+  }
+  // Remove from cache and re-render
+  window._adminUsers = (window._adminUsers || []).filter(u => u.id !== userId);
+  window._lbCache    = (window._lbCache    || []).filter(u => u.id !== userId);
+  playersCache        = playersCache.filter(u => u.id !== userId);
+  document.getElementById('users-count').textContent = window._adminUsers.length;
+  renderAdminUsers();
 }
 
 async function manualSync() {
