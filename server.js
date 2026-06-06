@@ -283,6 +283,23 @@ app.get('/api/users', auth, adminOnly, (req, res) => {
   res.json(dbAll('SELECT id,name,kitchen,email,is_admin,registered_at FROM users ORDER BY registered_at'));
 });
 
+// DELETE /api/users/:id  (admin, cannot delete self or other admins)
+app.delete('/api/users/:id', auth, adminOnly, (req, res) => {
+  const targetId = parseInt(req.params.id);
+  if (targetId === req.user.id)
+    return res.status(400).json({ error: 'No puedes eliminarte a ti mismo.' });
+  const target = dbGet('SELECT id, is_admin FROM users WHERE id=?', [targetId]);
+  if (!target)
+    return res.status(404).json({ error: 'Usuario no encontrado.' });
+  if (target.is_admin)
+    return res.status(400).json({ error: 'No puedes eliminar a otro admin.' });
+  // Delete predictions too
+  db.run('DELETE FROM predictions WHERE user_id=?', [targetId]);
+  db.run('DELETE FROM users WHERE id=?', [targetId]);
+  saveDb();
+  res.json({ ok: true });
+});
+
 // ════════════ HELPERS ════════════
 
 function calcScore(pred, result, phase) {
