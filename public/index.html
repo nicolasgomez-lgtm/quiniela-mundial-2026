@@ -219,7 +219,9 @@ nav{background:var(--surface2);border-bottom:1px solid var(--border);display:fle
     </div>
     <div class="error-msg" id="login-err"></div>
     <button class="btn-primary" id="login-btn" onclick="doLogin()">Entrar al torneo</button>
-    <div class="hint-box">💡 Admin: <b>admin@mundial.com</b> / <b>admin123</b><br>Cambia la contraseña del admin desde el panel una vez desplegado.</div>
+    <div id="login-wakeup" style="display:none;margin-top:10px;font-size:12px;color:var(--accent);
+      background:rgba(0,180,216,.07);border:1px solid rgba(0,180,216,.2);border-radius:8px;padding:10px 14px;line-height:1.6"></div>
+
   </div>
 </div>
 
@@ -244,6 +246,8 @@ nav{background:var(--surface2);border-bottom:1px solid var(--border);display:fle
     </div>
     <div class="error-msg" id="reg-err"></div>
     <button class="btn-primary" id="reg-btn" onclick="doRegister()">Unirme a la quiniela</button>
+    <div id="reg-wakeup" style="display:none;margin-top:10px;font-size:12px;color:var(--accent);
+      background:rgba(0,180,216,.07);border:1px solid rgba(0,180,216,.2);border-radius:8px;padding:10px 14px;line-height:1.6"></div>
   </div>
 </div>
 
@@ -516,12 +520,42 @@ let RESULTS = {};
 let viewingUser = null;
 let viewingPreds = {};
 
-async function api(method, path, body) {
-  const headers = {'Content-Type':'application/json'};
+async function api(method, path, body, timeoutMs = 65000) {
+  const headers = {'Content-Type': 'application/json'};
   if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
-  const res = await fetch(API + path, {method, headers, body: body ? JSON.stringify(body) : undefined});
-  if (res.status === 401) { logout(); return null; }
-  return res.json();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(API + path, {
+      method, headers,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    if (res.status === 401) { logout(); return null; }
+    return res.json();
+  } catch(e) {
+    clearTimeout(timer);
+    if (e.name === 'AbortError') return { error: 'El servidor tardó demasiado. Intenta de nuevo.' };
+    return { error: 'Sin conexión. Verifica tu internet.' };
+  }
+}
+
+// Wake-up aware fetch: shows a countdown if server is slow to respond
+async function apiWithWakeup(method, path, body, statusEl) {
+  let secs = 0;
+  const interval = setInterval(() => {
+    secs++;
+    if (statusEl && secs >= 3) {
+      statusEl.style.display = 'block';
+      if (secs < 15) statusEl.textContent = '⏳ Conectando...';
+      else statusEl.textContent = `🌅 Despertando servidor... (${secs}s) — el plan gratuito tarda hasta 50s la primera vez`;
+    }
+  }, 1000);
+  const result = await api(method, path, body);
+  clearInterval(interval);
+  if (statusEl) statusEl.style.display = 'none';
+  return result;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -529,7 +563,19 @@ async function api(method, path, body) {
 // ═══════════════════════════════════════════════════════
 async function init() {
   if (TOKEN) {
-    const me = await api('GET', '/api/me');
+    // Show a friendlier loading message while server wakes up
+    const overlay = document.getElementById('loading-overlay');
+    overlay.innerHTML = '<div><span class="spinner"></span> <span id="init-msg">Conectando...</span></div>';
+    let secs = 0;
+    const initTimer = setInterval(() => {
+      secs++;
+      const msg = document.getElementById('init-msg');
+      if (!msg) return;
+      if (secs >= 10) msg.textContent = `Despertando servidor... (${secs}s)`;
+      else if (secs >= 4) msg.textContent = 'Conectando al servidor...';
+    }, 1000);
+    const me = await api('GET', '/api/me', null, 65000);
+    clearInterval(initTimer);
     if (me && me.id) {
       ME = me;
       await loadMyData();
@@ -563,9 +609,11 @@ async function doLogin() {
   const pass  = document.getElementById('login-pass').value;
   const btn   = document.getElementById('login-btn');
   const err   = document.getElementById('login-err');
+  const wakeup = document.getElementById('login-wakeup');
   if (!email||!pass) { err.textContent='Completa todos los campos.'; return; }
+  err.textContent = '';
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Entrando...';
-  const res = await api('POST', '/api/login', {email, password: pass});
+  const res = await apiWithWakeup('POST', '/api/login', {email, password: pass}, wakeup);
   btn.disabled = false; btn.textContent = 'Entrar al torneo';
   if (!res || res.error) { err.textContent = res?.error || 'Error de conexión.'; return; }
   TOKEN = res.token; ME = res.user;
@@ -581,9 +629,11 @@ async function doRegister() {
   const pass    = document.getElementById('reg-pass').value;
   const btn     = document.getElementById('reg-btn');
   const err     = document.getElementById('reg-err');
+  const wakeup  = document.getElementById('reg-wakeup');
   if (!name||!kitchen||!email||!pass) { err.textContent='Completa todos los campos.'; return; }
+  err.textContent = '';
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Registrando...';
-  const res = await api('POST', '/api/register', {name, kitchen, email, password: pass});
+  const res = await apiWithWakeup('POST', '/api/register', {name, kitchen, email, password: pass}, wakeup);
   btn.disabled = false; btn.textContent = 'Unirme a la quiniela';
   if (!res || res.error) { err.textContent = res?.error || 'Error de conexión.'; return; }
   TOKEN = res.token; ME = res.user;
