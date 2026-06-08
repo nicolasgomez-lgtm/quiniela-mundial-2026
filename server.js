@@ -61,12 +61,20 @@ async function initDb() {
     );
   `);
 
-  // seed admin
-  const admin = dbGet('SELECT id FROM users WHERE email = ?', ['admin@mundial.com']);
+  // seed admin — migrate old account if exists, otherwise create fresh
+  const oldAdmin = dbGet('SELECT id FROM users WHERE email = ?', ['admin@mundial.com']);
+  if (oldAdmin) {
+    const hash = bcrypt.hashSync('Foodology2026', 10);
+    db.run('UPDATE users SET name=?, kitchen=?, email=?, password_hash=? WHERE id=?',
+           ['Nicolás Gómez', 'Dirección', 'nicolasgomez@foodology.com.co', hash, oldAdmin.id]);
+    saveDb();
+    console.log('✓ Admin migrado a nicolasgomez@foodology.com.co');
+  }
+  const admin = dbGet('SELECT id FROM users WHERE email = ?', ['nicolasgomez@foodology.com.co']);
   if (!admin) {
-    const hash = bcrypt.hashSync('admin123', 10);
+    const hash = bcrypt.hashSync('Foodology2026', 10);
     db.run('INSERT INTO users (name,kitchen,email,password_hash,is_admin) VALUES (?,?,?,?,1)',
-           ['Administrador', 'Dirección', 'admin@mundial.com', hash]);
+           ['Nicolás Gómez', 'Dirección', 'nicolasgomez@foodology.com.co', hash]);
     saveDb();
     console.log('✓ Admin creado');
   }
